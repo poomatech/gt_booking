@@ -1,52 +1,65 @@
-# 🎸 Greedy Thiefs Repetionstid
+# Greedy Thiefs repetitionstid
 
-En enkel webbapp för att hitta gemensam repetionstid för bandet Greedy Thiefs, inspirerad av Doodle.
+Doodle-liknande tidpoll för att hitta en gemensam reptid för bandet. Bandet
+klickar på en länk, skriver sitt namn och kryssar i de tider de kan — ingen
+inloggning.
 
 ## Funktioner
 
-- **Enkelt gränssnitt**: Ange ditt namn och markera vilka tider du kan
-- **Realtidöverblick**: Se direkt vilka tider som passar flest
-- **Offline-first**: Data sparas i browser-lagring (localStorage)
-- **Responsiv design**: Fungerar på mobil, tablet och desktop
+- **Delad databas i realtid**: allas svar sparas gemensamt i Firestore och syns
+  direkt hos de andra, oavsett webbläsare eller telefon
+- **Tre veckor framåt**, från måndagen i innevarande vecka, två pass per dag
+  (eftermiddag 12–17, kväll 17–21)
+- **Deadline**: någon sätter när röstningen stänger; tider som ligger före
+  deadline går inte att välja
+- **Populäraste tiderna** visas först på sidan, men bara när minst två kan samma
+  tid — dessförinnan finns det inget att välja mellan
+- **Två vyer**: rutnät (en tabell per vecka) eller lista (en rubrik per dag).
+  Lista är standard på mobil, rutnät på dator; eget val sparas
+- **Byggd för skärmläsare**: allt nåbart med tangentbord, tillstånd via
+  `aria-pressed`, statusmeddelanden via live-region, fokus flyttas när element
+  försvinner. Ingen information ges enbart med färg
 
-## Installation
+## Kräver Firestore-regler
+
+Appen läser och skriver `gt_booking_people` och `gt_booking_state` i
+Firebase-projektet `byggatexteer` — **utan inloggning**. Reglerna måste tillåta
+det, annars visar appen "Databasen nekar åtkomst".
+
+Se [`firestore.rules`](firestore.rules). Reglerna ska **läggas till** bland de
+befintliga i Firebase-konsolen, inte ersätta dem: övriga collections är låsta
+till ägarkontot och används av de andra apparna i repot.
+
+Det innebär att vem som helst med adressen till sajten kan rösta, ändra deadline
+eller rensa listan. Medvetet val — datan är reptider.
+
+## Utveckling
 
 ```bash
 npm install
 ```
 
-## Utveckling
-
 ```bash
 npm run dev
 ```
 
-Öppna sedan `http://localhost:5173` i din browser.
-
-## Byggning
+Öppnas på `http://localhost:5173`.
 
 ```bash
 npm run build
 ```
 
-Detta skapar en optimerad version i `dist/`-mappen.
+## Deployment
 
-## Deployment på Netlify
+Ligger på Netlify, som bygger automatiskt vid push till `main`. Se
+[`netlify.toml`](netlify.toml).
 
-1. Öppna [Netlify](https://app.netlify.com)
-2. Koppla denna Git-repo
-3. Netlify bygger och deployer automatiskt (se `netlify.toml` för konfiguration)
+## Teknik
 
-Eller deploy direkt via Netlify CLI:
-
-```bash
-npm install -g netlify-cli
-netlify deploy
-```
-
-## Teknologi
-
-- **React** 19 för interaktivt gränssnitt
-- **Vite** för snabb build och development
-- **localStorage** för datalagrering
-- **CSS Grid/Flexbox** för responsiv design
+- React + Vite
+- Firebase/Firestore för delad data. En doc per person
+  (`gt_booking_people/{id}`, id = namnet i gemener) så att två som röstar
+  samtidigt inte skriver över varandra; tider läggs till och tas bort med
+  `arrayUnion`/`arrayRemove`, som är atomiska server-side
+- localStorage används bara för inställningar per webbläsare: ditt eget namn och
+  ditt vyval
