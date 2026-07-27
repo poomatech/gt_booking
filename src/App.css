@@ -109,6 +109,22 @@ body {
   font-weight: 600;
 }
 
+.db-error {
+  background: #fee2e2;
+  border: 2px solid #b91c1c;
+  color: #7f1d1d;
+  padding: 14px 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-weight: 600;
+  max-width: 65ch;
+}
+
+.loading {
+  color: #4b5563;
+  margin-bottom: 20px;
+}
+
 .name-input button {
   padding: 12px 24px;
   font-size: 16px;

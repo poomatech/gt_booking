@@ -1,0 +1,46 @@
+// Firestore-regler för Greedy Thiefs-bokningen (projekt: byggatexteer).
+//
+// ⚠️ LÄGG TILL detta i dina BEFINTLIGA regler — ersätt dem inte.
+// Övriga collections (bookmarks, budget_*, rss_*, qnotes-apparnas data) är
+// låsta till poomap@gmail.com. Om du klistrar in ENBART blocket nedan slutar
+// budget-, RSS- och mobilappen att fungera.
+//
+// Så här gör du:
+//   1. Firebase-konsolen -> Firestore Database -> fliken "Rules"
+//   2. Klistra in de två match-blocken nedan INNANFÖR
+//      `match /databases/{database}/documents { ... }`, bredvid dina nuvarande
+//      regler.
+//   3. Publicera.
+//
+// Vad det innebär: gt_booking_people och gt_booking_state blir öppna för läsning
+// och skrivning UTAN inloggning. Det är avsiktligt — bandet ska kunna klicka på
+// länken och kryssa i tider direkt. Men det betyder också att vem som helst som
+// har adressen till sajten kan rösta, ändra deadline eller rensa listan.
+// Ingen annan data i projektet berörs.
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Greedy Thiefs-bokningen: öppen, ingen inloggning ──────────────
+    match /gt_booking_people/{personId} {
+      allow read, write: if true;
+    }
+
+    match /gt_booking_state/{docId} {
+      allow read, write: if true;
+    }
+
+    // ── DINA BEFINTLIGA REGLER SKA LIGGA KVAR HÄR ────────────────────
+    // t.ex.:
+    // match /{document=**} {
+    //   allow read, write: if request.auth != null
+    //                      && request.auth.token.email == 'poomap@gmail.com';
+    // }
+    //
+    // OBS: en bred `match /{document=**}`-regel krockar INTE med blocket ovan.
+    // Firestore ger åtkomst om NÅGON regel tillåter den, så gt_booking_* förblir
+    // öppna och allt annat förblir låst till ditt konto.
+  }
+}

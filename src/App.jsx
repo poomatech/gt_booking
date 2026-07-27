@@ -1,7 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
 import './App.css'
+import {
+  personId,
+  subscribePeople,
+  subscribeState,
+  joinPerson,
+  addSlot,
+  removeSlot,
+  clearPersonSlots,
+  deletePerson,
+  writeDeadline,
+  clearAll,
+} from './firebase'
 
-// id måste vara oförändrat — det är nyckeln i localStorage sedan tidigare versioner
+// id måste vara oförändrat — det ingår i nyckeln som sparas i Firestore
 const TIME_SLOTS = [
   { id: 'Eftermiddag (12-17)', label: 'Eftermiddag', range: '12–17', startHour: 12 },
   { id: 'Kväll (17-21)', label: 'Kväll', range: '17–21', startHour: 17 },
@@ -48,56 +60,58 @@ function toDateInputValue(date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+const slotKey = (dateLabel, slotId) => `${dateLabel}|${slotId}`
+
+function readableSlot(key) {
+  const [dateLabel, slotId] = key.split('|')
+  const slot = TIME_SLOTS.find((s) => s.id === slotId)
+  return `${dateLabel}, ${slot ? `${slot.label} ${slot.range}` : slotId}`
+}
+
 function App() {
   const [nameDraft, setNameDraft] = useState('')
-  const [responses, setResponses] = useState({})
+  const [submittedName, setSubmittedName] = useState(
+    () => localStorage.getItem('gt_my_name') || ''
+  )
   const [people, setPeople] = useState([])
-  const [submittedName, setSubmittedName] = useState('')
   const [deadline, setDeadline] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [dbError, setDbError] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const [nameError, setNameError] = useState('')
 
   const DATES = useRef(generateDates()).current
   const nameInputRef = useRef(null)
-  // Håller alltid färskaste svaren, även före omrendering — annars kan två
-  // markeringar i samma render-batch skriva över varandra.
-  const responsesRef = useRef({})
 
   const [deadlineDate, setDeadlineDate] = useState(() => toDateInputValue(new Date()))
   const [deadlineHour, setDeadlineHour] = useState('18')
 
+  // Realtidslyssnare: alla som har sidan öppen ser varandras kryss direkt.
   useEffect(() => {
-    const saved = localStorage.getItem('rehearsal_responses')
-    const savedDeadline = localStorage.getItem('rehearsal_deadline')
-    const savedPeople = localStorage.getItem('rehearsal_people')
-    if (saved) {
-      const parsed = JSON.parse(saved)
-      responsesRef.current = parsed
-      setResponses(parsed)
+    const onError = (err) => {
+      setLoading(false)
+      setDbError(
+        err?.code === 'permission-denied'
+          ? 'Databasen nekar åtkomst. Firestore-reglerna för gt_booking_* behöver läggas in (se firestore.rules i repot).'
+          : `Kunde inte nå databasen: ${err?.message || err}`
+      )
     }
-    if (savedDeadline) setDeadline(JSON.parse(savedDeadline))
-    if (savedPeople) {
-      setPeople(JSON.parse(savedPeople))
-    } else if (saved) {
-      // migrera: härled deltagare ur gamla svar
-      const derived = [...new Set(Object.keys(JSON.parse(saved)).map((k) => k.split('|')[0]))]
-      setPeople(derived)
-      localStorage.setItem('rehearsal_people', JSON.stringify(derived))
+    const unsubPeople = subscribePeople((list) => {
+      setPeople([...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'sv')))
+      setLoading(false)
+      setDbError('')
+    }, onError)
+    const unsubState = subscribeState((s) => setDeadline(s?.deadline || null), onError)
+    return () => {
+      unsubPeople()
+      unsubState()
     }
   }, [])
 
-  const persistResponses = (next) => {
-    responsesRef.current = next
-    setResponses(next)
-    localStorage.setItem('rehearsal_responses', JSON.stringify(next))
-  }
+  const me = people.find((p) => p.id === personId(submittedName))
+  const mySlots = me?.slots || []
 
-  const persistPeople = (next) => {
-    setPeople(next)
-    localStorage.setItem('rehearsal_people', JSON.stringify(next))
-  }
-
-  const handleNameSubmit = () => {
+  const handleNameSubmit = async () => {
     const trimmed = nameDraft.trim()
     if (!trimmed) {
       setNameError('Skriv ditt namn för att fortsätta.')
@@ -106,104 +120,82 @@ function App() {
     }
     setNameError('')
     setSubmittedName(trimmed)
+    localStorage.setItem('gt_my_name', trimmed)
     setNameDraft('')
-    if (!people.includes(trimmed)) persistPeople([...people, trimmed])
+    try {
+      await joinPerson(trimmed)
+    } catch (err) {
+      setDbError(`Kunde inte spara namnet: ${err.message}`)
+    }
+  }
+
+  const changeName = () => {
+    setSubmittedName('')
+    localStorage.removeItem('gt_my_name')
+  }
+
+  const run = async (fn, message) => {
+    try {
+      await fn()
+      if (message) setAnnouncement(message)
+    } catch (err) {
+      setDbError(`Åtgärden misslyckades: ${err.message}`)
+    }
   }
 
   const saveDeadline = () => {
     const dl = new Date(`${deadlineDate}T00:00:00`)
     dl.setHours(Number(deadlineHour), 0, 0, 0)
-    const value = { time: dl.toISOString(), setBy: submittedName }
-    setDeadline(value)
-    localStorage.setItem('rehearsal_deadline', JSON.stringify(value))
-    setAnnouncement(`Deadline satt till ${dl.toLocaleString('sv-SE')}.`)
+    return run(
+      () => writeDeadline({ time: dl.toISOString(), setBy: submittedName }),
+      `Deadline satt till ${dl.toLocaleString('sv-SE')}.`
+    )
   }
 
   const resetDeadline = () => {
     if (!window.confirm('Ta bort deadline? Röstningen öppnas då igen och någon kan sätta en ny.')) return
-    setDeadline(null)
-    localStorage.removeItem('rehearsal_deadline')
     setDeadlineDate(toDateInputValue(new Date()))
     setDeadlineHour('18')
-    setAnnouncement('Deadline borttagen. Röstningen är öppen igen.')
+    return run(() => writeDeadline(null), 'Deadline borttagen. Röstningen är öppen igen.')
   }
 
-  const removePerson = (person) => {
-    if (!window.confirm(`Ta bort ${person} och alla deras markerade tider?`)) return
-    const next = Object.fromEntries(
-      Object.entries(responsesRef.current).filter(([key]) => key.split('|')[0] !== person)
-    )
-    persistResponses(next)
-    persistPeople(people.filter((p) => p !== person))
-    if (person === submittedName) setSubmittedName('')
-    setAnnouncement(`${person} är borttagen.`)
+  const handleRemovePerson = (person) => {
+    if (!window.confirm(`Ta bort ${person.name} och alla deras markerade tider?`)) return
+    if (person.id === personId(submittedName)) changeName()
+    return run(() => deletePerson(person.name), `${person.name} är borttagen.`)
   }
 
-  const clearPersonAnswers = (person) => {
-    if (!window.confirm(`Nollställ alla tider för ${person}? Personen finns kvar i listan.`)) return
-    const next = Object.fromEntries(
-      Object.entries(responsesRef.current).filter(([key]) => key.split('|')[0] !== person)
-    )
-    persistResponses(next)
-    setAnnouncement(`Alla tider nollställda för ${person}.`)
+  const handleClearPerson = (person) => {
+    if (!window.confirm(`Nollställ alla tider för ${person.name}? Personen finns kvar i listan.`)) return
+    return run(() => clearPersonSlots(person.name), `Alla tider nollställda för ${person.name}.`)
   }
 
-  const clearEverything = () => {
+  const handleClearEverything = () => {
     if (!window.confirm('Rensa allt: alla deltagare, alla tider och deadline. Går inte att ångra. Fortsätt?')) return
-    persistResponses({})
-    persistPeople([])
-    setDeadline(null)
-    localStorage.removeItem('rehearsal_deadline')
-    setSubmittedName('')
-    setAnnouncement('Allt är rensat.')
+    changeName()
+    return run(() => clearAll(), 'Allt är rensat.')
   }
 
   const toggleTime = (dateEntry, slot) => {
-    const key = `${submittedName}|${dateEntry.label}|${slot.id}`
-    const next = { ...responsesRef.current }
-    const wasSelected = Boolean(next[key])
-    if (wasSelected) delete next[key]
-    else next[key] = true
-    persistResponses(next)
-
-    const count = countAvailable(dateEntry.label, slot.id, next)
+    const key = slotKey(dateEntry.label, slot.id)
+    const wasSelected = mySlots.includes(key)
+    // Räkna optimistiskt: snapshotet från servern hinner inte fram före uppläsningen.
+    const count = whoCan(dateEntry.label, slot.id).length + (wasSelected ? -1 : 1)
     setAnnouncement(
-      wasSelected
-        ? `Avmarkerat: ${dateEntry.spoken}, ${slot.label} ${slot.range}. Nu kan ${count} av ${people.length}.`
-        : `Markerat: ${dateEntry.spoken}, ${slot.label} ${slot.range}. Nu kan ${count} av ${people.length}.`
+      `${wasSelected ? 'Avmarkerat' : 'Markerat'}: ${dateEntry.spoken}, ${slot.label} ${slot.range}. Nu kan ${count} av ${people.length}.`
+    )
+    return run(() =>
+      wasSelected ? removeSlot(submittedName, key) : addSlot(submittedName, key)
     )
   }
 
-  const countAvailable = (dateLabel, slotId, source = responses) =>
-    Object.keys(source).filter((k) => {
-      const [, d, t] = k.split('|')
-      return d === dateLabel && t === slotId
-    }).length
-
   const whoCan = (dateLabel, slotId) =>
-    Object.keys(responses)
-      .filter((k) => {
-        const [, d, t] = k.split('|')
-        return d === dateLabel && t === slotId
-      })
-      .map((k) => k.split('|')[0])
-
-  const slotsForPerson = (person) =>
-    Object.keys(responses)
-      .filter((k) => k.split('|')[0] === person)
-      .map((k) => {
-        const [, dateLabel, slotId] = k.split('|')
-        const slot = TIME_SLOTS.find((s) => s.id === slotId)
-        return `${dateLabel}, ${slot ? `${slot.label} ${slot.range}` : slotId}`
-      })
+    people.filter((p) => (p.slots || []).includes(slotKey(dateLabel, slotId))).map((p) => p.name)
 
   const getTopThreeTimes = () => {
     const tally = new Map()
-    Object.keys(responses).forEach((key) => {
-      const [, dateLabel, slotId] = key.split('|')
-      const slot = TIME_SLOTS.find((s) => s.id === slotId)
-      const label = `${dateLabel}, ${slot ? `${slot.label} ${slot.range}` : slotId}`
-      tally.set(label, (tally.get(label) || 0) + 1)
+    people.forEach((p) => {
+      ;(p.slots || []).forEach((key) => tally.set(key, (tally.get(key) || 0) + 1))
     })
     return [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
   }
@@ -214,6 +206,11 @@ function App() {
         <div className="intro">
           <h1>Greedy Thiefs repetitionstid</h1>
           <p>Hitta en gemensam tid för nästa rep.</p>
+          {dbError && (
+            <p className="db-error" role="alert">
+              {dbError}
+            </p>
+          )}
           <div className="name-input">
             <label htmlFor="namn">Ditt namn</label>
             <input
@@ -259,7 +256,7 @@ function App() {
             <p className="current-user">
               Du: <strong>{submittedName}</strong>
             </p>
-            <button type="button" className="change-user" onClick={() => setSubmittedName('')}>
+            <button type="button" className="change-user" onClick={changeName}>
               Byt namn
             </button>
           </div>
@@ -270,7 +267,15 @@ function App() {
           {announcement}
         </p>
 
-        {!deadline && (
+        {dbError && (
+          <p className="db-error" role="alert">
+            {dbError}
+          </p>
+        )}
+
+        {loading && <p className="loading">Hämtar allas svar…</p>}
+
+        {!deadline && !loading && (
           <section className="deadline-setup" aria-labelledby="deadline-rubrik">
             <h2 id="deadline-rubrik">Sätt deadline för röstning</h2>
             <p id="deadline-hjalp">När deadline passerats går det inte längre att ändra sina tider.</p>
@@ -329,7 +334,7 @@ function App() {
           <h2 id="kalender-rubrik">Välj de tider du kan</h2>
           <p className="poll-help">
             Markera varje tid du kan. Du kan ändra dig fram till deadline. Tider som redan passerat går inte
-            att välja.
+            att välja. Allas svar sparas gemensamt och syns direkt hos de andra.
           </p>
 
           {[0, 1, 2].map((weekIndex) => {
@@ -358,7 +363,7 @@ function App() {
                           <span className="time-range"> {slot.range}</span>
                         </th>
                         {weekDates.map((d) => {
-                          const selected = Boolean(responses[`${submittedName}|${d.label}|${slot.id}`])
+                          const selected = mySlots.includes(slotKey(d.label, slot.id))
                           const available = whoCan(d.label, slot.id)
                           const past = isInPast(d.date, slot)
                           const disabled = past || deadlinePassed
@@ -416,15 +421,15 @@ function App() {
 
         <section className="summary" aria-labelledby="deltagare-rubrik">
           <h2 id="deltagare-rubrik">Deltagare ({people.length})</h2>
-          {people.length === 0 && <p>Ingen har anmält sig än.</p>}
+          {people.length === 0 && !loading && <p>Ingen har anmält sig än.</p>}
           <ul className="participants-grid">
             {people.map((person) => {
-              const slots = slotsForPerson(person)
+              const slots = (person.slots || []).map(readableSlot).sort()
               return (
-                <li key={person} className="participant-card">
+                <li key={person.id} className="participant-card">
                   <h3 className="participant-name">
-                    {person}
-                    {person === submittedName && <span className="you-badge"> (du)</span>}
+                    {person.name}
+                    {person.id === personId(submittedName) && <span className="you-badge"> (du)</span>}
                   </h3>
                   {slots.length > 0 ? (
                     <>
@@ -436,21 +441,23 @@ function App() {
                       </ul>
                     </>
                   ) : (
-                    <p className="participant-times participant-none">
-                      Har inte markerat någon tid
-                    </p>
+                    <p className="participant-times participant-none">Har inte markerat någon tid</p>
                   )}
                   <div className="participant-actions">
                     <button
                       type="button"
                       className="link-button"
-                      onClick={() => clearPersonAnswers(person)}
+                      onClick={() => handleClearPerson(person)}
                       disabled={slots.length === 0}
                     >
-                      Nollställ tider<span className="sr-only"> för {person}</span>
+                      Nollställ tider<span className="sr-only"> för {person.name}</span>
                     </button>
-                    <button type="button" className="link-button danger" onClick={() => removePerson(person)}>
-                      Ta bort<span className="sr-only"> {person}</span>
+                    <button
+                      type="button"
+                      className="link-button danger"
+                      onClick={() => handleRemovePerson(person)}
+                    >
+                      Ta bort<span className="sr-only"> {person.name}</span>
                     </button>
                   </div>
                 </li>
@@ -463,9 +470,9 @@ function App() {
           <section className="best-times" aria-labelledby="topp-rubrik">
             <h2 id="topp-rubrik">Tre populäraste tiderna</h2>
             <ol>
-              {topTimes.map(([slotLabel, count]) => (
-                <li key={slotLabel} className="top-time">
-                  {slotLabel} — {count} av {people.length} kan
+              {topTimes.map(([key, count]) => (
+                <li key={key} className="top-time">
+                  {readableSlot(key)} — {count} av {people.length} kan
                 </li>
               ))}
             </ol>
@@ -474,7 +481,7 @@ function App() {
 
         <section className="admin" aria-labelledby="admin-rubrik">
           <h2 id="admin-rubrik">Hantera</h2>
-          <p>Åtgärderna nedan går inte att ångra.</p>
+          <p>Åtgärderna nedan gäller alla och går inte att ångra.</p>
           <div className="admin-actions">
             <button type="button" className="danger-button" onClick={resetDeadline} disabled={!deadline}>
               Ta bort deadline
@@ -482,7 +489,7 @@ function App() {
             <button
               type="button"
               className="danger-button"
-              onClick={clearEverything}
+              onClick={handleClearEverything}
               disabled={people.length === 0 && !deadline}
             >
               Rensa allt
