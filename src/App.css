@@ -761,9 +761,27 @@ h2:focus-visible {
   cursor: not-allowed;
 }
 
+.site-footer {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 28px 24px 36px;
+  border-top: 1px solid #d1d5db;
+  text-align: center;
+  color: #4b5563;
+  font-size: 14px;
+}
+
+.site-footer p + p {
+  margin-top: 6px;
+}
+
 @media (max-width: 768px) {
   .app {
     padding: 16px;
+  }
+
+  .site-footer {
+    padding: 24px 16px 28px;
   }
 
   .header {

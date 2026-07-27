@@ -64,6 +64,19 @@ function toDateInputValue(date) {
 // i stället för per komponent — då kan även hjälpfunktionerna nedan använda den.
 const DATES = generateDates()
 
+// Sidfoten ligger utanför <main> så att den blir en egen landmark, och visas
+// på både namnskärmen och kalendern. Den engelska raden är märkt lang="en" —
+// annars läser den svenska talsyntesen den med svenskt uttal, vilket blir
+// obegripligt.
+function SiteFooter() {
+  return (
+    <footer className="site-footer">
+      <p>© 2026 Mattias Ericson</p>
+      <p lang="en">This is a Marvelous Website by qProd.</p>
+    </footer>
+  )
+}
+
 const slotKey = (dateLabel, slotId) => `${dateLabel}|${slotId}`
 
 // Upplästa datum ("fredag 31 juli") i stället för de förkortade som visas
@@ -331,41 +344,44 @@ function App() {
 
   if (!submittedName) {
     return (
-      <main className="app">
-        <div className="intro">
-          <h1>Greedy Thiefs repetitionstid</h1>
-          <p>Hitta en gemensam tid för nästa rep.</p>
-          {dbError && (
-            <p className="db-error" role="alert">
-              {dbError}
-            </p>
-          )}
-          <div className="name-input">
-            <label htmlFor="namn">Ditt namn</label>
-            <input
-              id="namn"
-              ref={nameInputRef}
-              type="text"
-              value={nameDraft}
-              autoComplete="name"
-              aria-describedby={nameError ? 'namn-fel' : undefined}
-              aria-invalid={nameError ? 'true' : undefined}
-              onChange={(e) => setNameDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleNameSubmit()
-              }}
-            />
-            {nameError && (
-              <p className="field-error" id="namn-fel" role="alert">
-                {nameError}
+      <>
+        <main className="app">
+          <div className="intro">
+            <h1>Greedy Thiefs repetitionstid</h1>
+            <p>Hitta en gemensam tid för nästa rep.</p>
+            {dbError && (
+              <p className="db-error" role="alert">
+                {dbError}
               </p>
             )}
-            <button type="button" onClick={handleNameSubmit}>
-              Börja
-            </button>
+            <div className="name-input">
+              <label htmlFor="namn">Ditt namn</label>
+              <input
+                id="namn"
+                ref={nameInputRef}
+                type="text"
+                value={nameDraft}
+                autoComplete="name"
+                aria-describedby={nameError ? 'namn-fel' : undefined}
+                aria-invalid={nameError ? 'true' : undefined}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleNameSubmit()
+                }}
+              />
+              {nameError && (
+                <p className="field-error" id="namn-fel" role="alert">
+                  {nameError}
+                </p>
+              )}
+              <button type="button" onClick={handleNameSubmit}>
+                Börja
+              </button>
+            </div>
           </div>
-        </div>
-      </main>
+        </main>
+        <SiteFooter />
+      </>
     )
   }
 
@@ -771,6 +787,7 @@ function App() {
           </div>
         </section>
       </main>
+      <SiteFooter />
     </>
   )
 }
