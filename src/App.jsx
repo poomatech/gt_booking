@@ -75,6 +75,27 @@ function spokenSlot(key) {
   return `${day ? day.spoken : dateLabel}, ${slot ? `${slot.label} ${slot.range}` : slotId}`
 }
 
+// Minst så här många måste kunna SAMMA tid för att den ska räknas som populär.
+// Med bara en person som kan en tid finns ingen överlappning att prata om —
+// då är "populäraste tiderna" bara en avskrift av den personens egen lista.
+const MIN_OVERLAP = 2
+
+// Avgör om topplistan bär någon information än, och vilka tider som i så fall
+// kvalificerar sig. Används både för det som visas och för det som läses upp,
+// så de två aldrig kan säga olika saker.
+function popularTimes(peopleList, limit = 5) {
+  const voters = peopleList.filter((p) => (p.slots || []).length > 0).length
+  const qualifying = topTimesFrom(peopleList, Infinity).filter(([, c]) => c >= MIN_OVERLAP)
+  return {
+    // Två villkor, inte ett: det räcker inte att två personer har svarat om de
+    // inte överlappar någonstans. Då finns fortfarande inget att välja mellan.
+    ready: voters >= 2 && qualifying.length > 0,
+    voters,
+    qualifying,
+    shown: qualifying.slice(0, limit),
+  }
+}
+
 // De N mest valda tiderna. Flest röster först; vid lika många vinner det
 // tidigaste datumet, annars avgörs ordningen av godtycklig insättningsordning.
 function topTimesFrom(peopleList, n) {
@@ -161,13 +182,13 @@ function App() {
       // gång någon annan kryssar i en tid.
       if (!hasLoadedOnce.current) {
         hasLoadedOnce.current = true
-        const best = topTimesFrom(list, 1)[0]
+        const p = popularTimes(list, 5)
         setAnnouncement(
           list.length === 0
             ? 'Inläst. Ingen har anmält sig än.'
-            : best
-              ? `Inläst. ${list.length} deltagare. Populäraste tiden: ${spokenSlot(best[0])}, ${best[1]} av ${list.length} kan. Hela listan står först på sidan.`
-              : `Inläst. ${list.length} deltagare. Ingen har markerat någon tid än.`
+            : p.ready
+              ? `Inläst. ${list.length} deltagare. Populäraste tiden: ${spokenSlot(p.shown[0][0])}, ${p.shown[0][1]} av ${list.length} kan. Hela listan står först på sidan.`
+              : `Inläst. ${list.length} deltagare. Ingen tid har ${MIN_OVERLAP} som kan än.`
         )
       }
     }, onError)
@@ -291,7 +312,22 @@ function App() {
   const whoCan = (dateLabel, slotId) =>
     people.filter((p) => (p.slots || []).includes(slotKey(dateLabel, slotId))).map((p) => p.name)
 
-  const topTimes = topTimesFrom(people, 5)
+  const popular = popularTimes(people, 5)
+
+  // Markera direkt ur topplistan. Faller tiden under tröskeln av att man
+  // avmarkerar den försvinner raden — då flyttas fokus till rubriken i stället
+  // för att falla till <body>.
+  const toggleFromTop = (key) => {
+    const [dateLabel, slotId] = key.split('|')
+    const dateEntry = DATES.find((d) => d.label === dateLabel)
+    const slot = TIME_SLOTS.find((s) => s.id === slotId)
+    if (!dateEntry || !slot) return
+    const wasSelected = mySlots.includes(key)
+    if (wasSelected && whoCan(dateLabel, slotId).length - 1 < MIN_OVERLAP) {
+      setFocusRequest('topp-rubrik')
+    }
+    toggleTime(dateEntry, slot)
+  }
 
   if (!submittedName) {
     return (
@@ -412,16 +448,57 @@ function App() {
             <h2 id="topp-rubrik" tabIndex={-1}>
               Populäraste tiderna
             </h2>
-            {topTimes.length > 0 ? (
-              <ol>
-                {topTimes.map(([key, count]) => (
-                  <li key={key} className="top-time">
-                    {readableSlot(key)} — {count} av {people.length} kan
-                  </li>
-                ))}
-              </ol>
+            {popular.ready ? (
+              <>
+                <p className="best-times-help">
+                  Tider som minst {MIN_OVERLAP} kan. Tryck på en för att markera att du också kan.
+                </p>
+                <ol className="top-list">
+                  {popular.shown.map(([key, count]) => {
+                    const selected = mySlots.includes(key)
+                    const [dateLabel, slotId] = key.split('|')
+                    const past = (() => {
+                      const d = DATES.find((x) => x.label === dateLabel)
+                      const s = TIME_SLOTS.find((x) => x.id === slotId)
+                      return d && s ? isInPast(d.date, s) : true
+                    })()
+                    return (
+                      <li key={key} className="top-time">
+                        <button
+                          type="button"
+                          className={`top-button ${selected ? 'selected' : ''}`}
+                          aria-pressed={selected}
+                          aria-label={`${spokenSlot(key)}. ${count} av ${people.length} kan.${
+                            past ? ' Tiden har passerat.' : ''
+                          }`}
+                          disabled={past || deadlinePassed}
+                          onClick={() => toggleFromTop(key)}
+                        >
+                          <span aria-hidden="true" className="slot-name">
+                            {selected && <span className="checkmark">✓ </span>}
+                            {readableSlot(key)}
+                          </span>
+                          <span aria-hidden="true" className="slot-status">
+                            {count} av {people.length} kan
+                          </span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ol>
+                {popular.qualifying.length > popular.shown.length && (
+                  <p className="best-times-note">
+                    Visar {popular.shown.length} av {popular.qualifying.length} tider som minst{' '}
+                    {MIN_OVERLAP} kan.
+                  </p>
+                )}
+              </>
             ) : (
-              <p>Ingen har markerat någon tid än.</p>
+              <p>
+                {popular.voters < 2
+                  ? `Visas när minst två har svarat. Hittills har ${popular.voters} svarat.`
+                  : 'Visas när minst två kan samma tid. Än så länge överlappar ingen med någon annan.'}
+              </p>
             )}
           </section>
         )}
