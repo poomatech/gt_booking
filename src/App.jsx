@@ -96,7 +96,19 @@ function App() {
   const [focusRequest, setFocusRequest] = useState(null)
   // Vyval är en inställning per webbläsare, inte delad data — hör hemma i
   // localStorage, till skillnad från svaren som ligger i Firestore.
-  const [view, setView] = useState(() => localStorage.getItem('gt_view') || 'rutnat')
+  const [view, setView] = useState(() => {
+    const saved = localStorage.getItem('gt_view')
+    if (saved === 'lista' || saved === 'rutnat') return saved
+    // Inget eget val gjort ännu: gissa utifrån skärmbredd. Ett rutnät med sju
+    // kolumner kräver sidledsscroll på mobil, listan gör inte det. Brytpunkten
+    // är samma 768px som CSS:en använder.
+    //
+    // Gissningen görs EN gång, vid första renderingen. Att lyssna på resize och
+    // byta vy i farten skulle bygga om hela kalendern mitt i att någon fyller i
+    // den — och för den som använder skärmläsare skulle sidans struktur ändras
+    // tyst under fötterna. Eget val vinner alltid och sparas.
+    return window.matchMedia('(max-width: 768px)').matches ? 'lista' : 'rutnat'
+  })
 
   const DATES = useRef(generateDates()).current
   const nameInputRef = useRef(null)
