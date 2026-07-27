@@ -62,6 +62,20 @@ function toDateInputValue(date) {
 
 const slotKey = (dateLabel, slotId) => `${dateLabel}|${slotId}`
 
+// Sorterar tider KRONOLOGISKT. En rak .sort() på nycklarna ger alfabetisk
+// ordning ("Lör 15 aug" före "Lör 8 aug", "Mån" före "Ons"), vilket är obegripligt
+// att lyssna sig igenom. Ordningen hämtas i stället från kalenderns egen följd.
+function sortSlotKeys(keys, dates) {
+  const dateOrder = new Map(dates.map((d, i) => [d.label, i]))
+  const rank = (key) => {
+    const [dateLabel, slotId] = key.split('|')
+    const day = dateOrder.has(dateLabel) ? dateOrder.get(dateLabel) : Number.MAX_SAFE_INTEGER
+    const slot = TIME_SLOTS.findIndex((s) => s.id === slotId)
+    return day * 10 + (slot === -1 ? 9 : slot)
+  }
+  return [...keys].sort((a, b) => rank(a) - rank(b))
+}
+
 function readableSlot(key) {
   const [dateLabel, slotId] = key.split('|')
   const slot = TIME_SLOTS.find((s) => s.id === slotId)
@@ -79,9 +93,11 @@ function App() {
   const [dbError, setDbError] = useState('')
   const [announcement, setAnnouncement] = useState('')
   const [nameError, setNameError] = useState('')
+  const [focusRequest, setFocusRequest] = useState(null)
 
   const DATES = useRef(generateDates()).current
   const nameInputRef = useRef(null)
+  const hasLoadedOnce = useRef(false)
 
   const [deadlineDate, setDeadlineDate] = useState(() => toDateInputValue(new Date()))
   const [deadlineHour, setDeadlineHour] = useState('18')
@@ -100,6 +116,17 @@ function App() {
       setPeople([...list].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'sv')))
       setLoading(false)
       setDbError('')
+      // Bara FÖRSTA inläsningen annonseras. Senare ändringar från andra
+      // deltagare skrivs tyst in — annars avbryts uppläsningen mitt i varje
+      // gång någon annan kryssar i en tid.
+      if (!hasLoadedOnce.current) {
+        hasLoadedOnce.current = true
+        setAnnouncement(
+          list.length === 0
+            ? 'Inläst. Ingen har anmält sig än.'
+            : `Inläst. ${list.length} deltagare.`
+        )
+      }
     }, onError)
     const unsubState = subscribeState((s) => setDeadline(s?.deadline || null), onError)
     return () => {
@@ -107,6 +134,16 @@ function App() {
       unsubState()
     }
   }, [])
+
+  // När en åtgärd tar bort elementet som hade fokus (t.ex. "Ta bort Anna")
+  // hamnar fokus annars på <body>, och den som använder skärmläsare tappar sin
+  // plats i dokumentet helt. Vi flyttar fokus till närmaste rubrik som finns
+  // kvar, efter att omrenderingen har hunnit ske.
+  useEffect(() => {
+    if (!focusRequest) return
+    document.getElementById(focusRequest)?.focus()
+    setFocusRequest(null)
+  }, [focusRequest, people, deadline, submittedName])
 
   const me = people.find((p) => p.id === personId(submittedName))
   const mySlots = me?.slots || []
@@ -132,6 +169,7 @@ function App() {
   const changeName = () => {
     setSubmittedName('')
     localStorage.removeItem('gt_my_name')
+    setFocusRequest('namn')
   }
 
   const run = async (fn, message) => {
@@ -156,17 +194,25 @@ function App() {
     if (!window.confirm('Ta bort deadline? Röstningen öppnas då igen och någon kan sätta en ny.')) return
     setDeadlineDate(toDateInputValue(new Date()))
     setDeadlineHour('18')
+    // Deadline-rutan byts mot formuläret — fokus dit, inte till <body>.
+    setFocusRequest('deadline-rubrik')
     return run(() => writeDeadline(null), 'Deadline borttagen. Röstningen är öppen igen.')
   }
 
   const handleRemovePerson = (person) => {
     if (!window.confirm(`Ta bort ${person.name} och alla deras markerade tider?`)) return
-    if (person.id === personId(submittedName)) changeName()
+    if (person.id === personId(submittedName)) {
+      changeName()
+    } else {
+      setFocusRequest('deltagare-rubrik')
+    }
     return run(() => deletePerson(person.name), `${person.name} är borttagen.`)
   }
 
   const handleClearPerson = (person) => {
     if (!window.confirm(`Nollställ alla tider för ${person.name}? Personen finns kvar i listan.`)) return
+    // Knappen man står på blir inaktiverad av åtgärden; flytta till kortets rubrik.
+    setFocusRequest(`deltagare-${person.id}`)
     return run(() => clearPersonSlots(person.name), `Alla tider nollställda för ${person.name}.`)
   }
 
@@ -197,7 +243,13 @@ function App() {
     people.forEach((p) => {
       ;(p.slots || []).forEach((key) => tally.set(key, (tally.get(key) || 0) + 1))
     })
-    return [...tally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+    // Flest röster först. Vid lika många vinner det tidigaste datumet — annars
+    // avgörs ordningen av godtycklig insättningsordning i Map:en.
+    const chronological = sortSlotKeys([...tally.keys()], DATES)
+    return chronological
+      .map((key) => [key, tally.get(key)])
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
   }
 
   if (!submittedName) {
@@ -277,7 +329,9 @@ function App() {
 
         {!deadline && !loading && (
           <section className="deadline-setup" aria-labelledby="deadline-rubrik">
-            <h2 id="deadline-rubrik">Sätt deadline för röstning</h2>
+            <h2 id="deadline-rubrik" tabIndex={-1}>
+              Sätt deadline för röstning
+            </h2>
             <p id="deadline-hjalp">När deadline passerats går det inte längre att ändra sina tider.</p>
             <div className="deadline-form">
               <div className="field">
@@ -375,12 +429,15 @@ function App() {
                             : deadlinePassed
                               ? 'Röstningen är stängd.'
                               : ''
+                          // Ditt EGET svar står inte i texten — aria-pressed säger
+                          // redan "nedtryckt/ej nedtryckt". Att upprepa det här
+                          // gör att skärmläsaren säger samma sak två gånger, i
+                          // varje av de 42 cellerna.
                           const label = [
                             `${d.spoken}, ${slot.label} ${slot.range}.`,
-                            selected ? 'Du kan.' : 'Du har inte markerat.',
                             available.length > 0
                               ? `${available.length} av ${people.length} kan: ${available.join(', ')}.`
-                              : 'Ingen har markerat än.',
+                              : 'Ingen kan än.',
                             reason,
                           ]
                             .filter(Boolean)
@@ -420,14 +477,16 @@ function App() {
         </section>
 
         <section className="summary" aria-labelledby="deltagare-rubrik">
-          <h2 id="deltagare-rubrik">Deltagare ({people.length})</h2>
+          <h2 id="deltagare-rubrik" tabIndex={-1}>
+            Deltagare ({people.length})
+          </h2>
           {people.length === 0 && !loading && <p>Ingen har anmält sig än.</p>}
           <ul className="participants-grid">
             {people.map((person) => {
-              const slots = (person.slots || []).map(readableSlot).sort()
+              const slots = sortSlotKeys(person.slots || [], DATES).map(readableSlot)
               return (
                 <li key={person.id} className="participant-card">
-                  <h3 className="participant-name">
+                  <h3 className="participant-name" id={`deltagare-${person.id}`} tabIndex={-1}>
                     {person.name}
                     {person.id === personId(submittedName) && <span className="you-badge"> (du)</span>}
                   </h3>
