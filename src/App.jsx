@@ -1,29 +1,58 @@
 import { useState, useEffect } from 'react'
 import './App.css'
 
-const DATES = [
-  'Fre 31 jul',
-  'Lör 1 aug',
-  'Sön 2 aug',
-  'Fre 7 aug',
-  'Lör 8 aug',
-  'Sön 9 aug',
-  'Fre 14 aug',
-  'Lör 15 aug',
-  'Sön 16 aug',
-]
-
 const TIME_SLOTS = ['Eftermiddag (12-17)', 'Kväll (17-21)']
+
+function generateDates() {
+  const today = new Date()
+  const dayOfWeek = today.getDay()
+  const daysUntilMonday = dayOfWeek === 1 ? 0 : (dayOfWeek === 0 ? 1 : 8 - dayOfWeek)
+  const monday = new Date(today)
+  monday.setDate(today.getDate() + daysUntilMonday)
+
+  const dates = []
+  const dayNames = ['Sön', 'Mån', 'Tis', 'Ons', 'Tor', 'Fre', 'Lör']
+  const monthNames = ['jan', 'feb', 'mar', 'apr', 'maj', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec']
+
+  for (let i = 0; i < 21; i++) {
+    const date = new Date(monday)
+    date.setDate(monday.getDate() + i)
+    const dayName = dayNames[date.getDay()]
+    const day = date.getDate()
+    const month = monthNames[date.getMonth()]
+    dates.push({ label: `${dayName} ${day} ${month}`, date })
+  }
+  return dates
+}
+
+function canBook(dateObj, timeSlot) {
+  const now = new Date()
+  const [start] = timeSlot.match(/\d+/g)
+  const startHour = parseInt(start)
+
+  const bookDate = new Date(dateObj)
+  bookDate.setHours(startHour, 0, 0, 0)
+
+  return bookDate > now
+}
 
 function App() {
   const [name, setName] = useState('')
   const [responses, setResponses] = useState({})
   const [submittedName, setSubmittedName] = useState('')
+  const [deadline, setDeadline] = useState(null)
+  const [deadlineTime, setDeadlineTime] = useState('')
+
+  const DATES = generateDates()
 
   useEffect(() => {
     const saved = localStorage.getItem('rehearsal_responses')
+    const savedDeadline = localStorage.getItem('rehearsal_deadline')
     if (saved) {
       setResponses(JSON.parse(saved))
+    }
+    if (savedDeadline) {
+      setDeadline(JSON.parse(savedDeadline))
     }
   }, [])
 
@@ -31,11 +60,23 @@ function App() {
     if (name.trim()) {
       setSubmittedName(name.trim())
       setName('')
+      if (!deadline) {
+        setDeadlineTime('')
+      }
     }
   }
 
-  const toggleTime = (date, time) => {
-    const key = `${submittedName}|${date}|${time}`
+  const setDeadlineHandler = (hours) => {
+    const deadlineDate = new Date()
+    deadlineDate.setHours(hours, 0, 0, 0)
+    const dl = { time: deadlineDate.toISOString(), setBy: submittedName }
+    setDeadline(dl)
+    localStorage.setItem('rehearsal_deadline', JSON.stringify(dl))
+  }
+
+  const toggleTime = (dateObj, time) => {
+    const dateLabel = DATES.find(d => d.date.getTime() === dateObj.getTime())?.label
+    const key = `${submittedName}|${dateLabel}|${time}`
     const newResponses = { ...responses }
     if (newResponses[key]) {
       delete newResponses[key]
@@ -46,30 +87,33 @@ function App() {
     localStorage.setItem('rehearsal_responses', JSON.stringify(newResponses))
   }
 
-  const getAvailability = (date, time) => {
-    return Object.keys(responses).filter(k => k.endsWith(`${date}|${time}`)).length
+  const getAvailability = (dateLabel, time) => {
+    return Object.keys(responses).filter(k => k.endsWith(`${dateLabel}|${time}`)).length
   }
 
   const getParticipants = () => {
-    const participants = new Set()
+    const participants = new Map()
     Object.keys(responses).forEach(key => {
-      const [name] = key.split('|')
-      participants.add(name)
+      const [name, dateLabel, time] = key.split('|')
+      if (!participants.has(name)) {
+        participants.set(name, [])
+      }
+      participants.get(name).push(`${dateLabel} ${time}`)
     })
-    return Array.from(participants)
+    return participants
   }
 
-  const getMaxAvailability = () => {
-    let max = 0
-    DATES.forEach(date => {
-      TIME_SLOTS.forEach(time => {
-        max = Math.max(max, getAvailability(date, time))
-      })
+  const getTopThreeTimes = () => {
+    const availability = new Map()
+    Object.keys(responses).forEach(key => {
+      const [, dateLabel, time] = key.split('|')
+      const slotKey = `${dateLabel} ${time}`
+      availability.set(slotKey, (availability.get(slotKey) || 0) + 1)
     })
-    return max
+    return Array.from(availability.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
   }
-
-  const maxAvail = getMaxAvailability()
 
   if (!submittedName) {
     return (
@@ -92,6 +136,10 @@ function App() {
     )
   }
 
+  const participants = getParticipants()
+  const topTimes = getTopThreeTimes()
+  const deadlinePassed = deadline && new Date(deadline.time) < new Date()
+
   return (
     <div className="app">
       <div className="header">
@@ -104,13 +152,32 @@ function App() {
         </div>
       </div>
 
+      {!deadline && (
+        <div className="deadline-setup">
+          <h2>Sätt deadline för röstning</h2>
+          <p>Första personen sätter när röstningen stänger</p>
+          <div className="deadline-buttons">
+            <button onClick={() => setDeadlineHandler(18)}>Idag 18:00</button>
+            <button onClick={() => setDeadlineHandler(20)}>Idag 20:00</button>
+            <button onClick={() => setDeadlineHandler(22)}>Idag 22:00</button>
+          </div>
+        </div>
+      )}
+
+      {deadline && (
+        <div className={`deadline-info ${deadlinePassed ? 'passed' : ''}`}>
+          <p>Deadline: {new Date(deadline.time).toLocaleString('sv-SE')} (satt av {deadline.setBy})</p>
+          {deadlinePassed && <p className="deadline-alert">⏰ Röstningen är stängd!</p>}
+        </div>
+      )}
+
       <div className="poll">
         <table className="availability-table">
           <thead>
             <tr>
               <th>Tid</th>
-              {DATES.map(date => (
-                <th key={date}>{date}</th>
+              {DATES.map(d => (
+                <th key={d.label}>{d.label}</th>
               ))}
             </tr>
           </thead>
@@ -118,28 +185,33 @@ function App() {
             {TIME_SLOTS.map(time => (
               <tr key={time}>
                 <td className="time-label">{time}</td>
-                {DATES.map(date => {
-                  const isSelected = responses[`${submittedName}|${date}|${time}`]
-                  const availability = getAvailability(date, time)
-                  const intensity = maxAvail > 0 ? availability / maxAvail : 0
+                {DATES.map(d => {
+                  const isSelected = responses[`${submittedName}|${d.label}|${time}`]
+                  const availability = getAvailability(d.label, time)
+                  const canBookThisSlot = canBook(d.date, time)
+                  const isDisabled = !canBookThisSlot || deadlinePassed
+
                   return (
                     <td
-                      key={`${date}-${time}`}
-                      onClick={() => toggleTime(date, time)}
-                      className={`time-cell ${isSelected ? 'selected' : ''}`}
+                      key={`${d.label}-${time}`}
+                      onClick={() => !isDisabled && toggleTime(d.date, time)}
+                      className={`time-cell ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}`}
                       style={{
-                        backgroundColor: isSelected
+                        backgroundColor: isDisabled
+                          ? '#e5e7eb'
+                          : isSelected
                           ? '#10b981'
-                          : intensity > 0
-                          ? `rgba(34, 197, 94, ${intensity * 0.5})`
+                          : availability > 0
+                          ? `rgba(34, 197, 94, ${Math.min(availability / (participants.size || 1), 1) * 0.5})`
                           : 'transparent',
+                        cursor: isDisabled ? 'not-allowed' : 'pointer',
+                        opacity: isDisabled ? 0.6 : 1,
                       }}
                     >
                       <div className="cell-content">
                         {isSelected && <span className="checkmark">✓</span>}
-                        {availability > 0 && (
-                          <span className="count">{availability}</span>
-                        )}
+                        {availability > 0 && <span className="count">{availability}</span>}
+                        {isDisabled && !canBookThisSlot && <span className="locked">🔒</span>}
                       </div>
                     </td>
                   )
@@ -151,31 +223,31 @@ function App() {
       </div>
 
       <div className="summary">
-        <h2>Deltagare ({getParticipants().length})</h2>
-        <div className="participants-list">
-          {getParticipants().map(p => (
-            <span key={p} className="participant-tag">
-              {p}
-            </span>
+        <h2>Deltagare ({participants.size})</h2>
+        <div className="participants-grid">
+          {Array.from(participants.entries()).map(([name, times]) => (
+            <div key={name} className="participant-card">
+              <p className="participant-name">{name}</p>
+              <p className="participant-times">{times.length} gånger markerad</p>
+              <ul className="participant-slots">
+                {times.slice(0, 3).map((slot, i) => (
+                  <li key={i}>{slot}</li>
+                ))}
+                {times.length > 3 && <li>... +{times.length - 3}</li>}
+              </ul>
+            </div>
           ))}
         </div>
 
-        {maxAvail > 0 && (
+        {topTimes.length > 0 && (
           <div className="best-times">
-            <h2>Bästa tider</h2>
+            <h2>🏆 Top 3 tider</h2>
             <ul>
-              {DATES.map(date => {
-                const bestTimes = TIME_SLOTS.filter(
-                  time => getAvailability(date, time) === maxAvail
-                )
-                if (bestTimes.length > 0) {
-                  return (
-                    <li key={date}>
-                      <strong>{date}:</strong> {bestTimes.join(', ')} ({maxAvail} personer)
-                    </li>
-                  )
-                }
-              })}
+              {topTimes.map(([slot, count], i) => (
+                <li key={i} className="top-time">
+                  <strong>#{i + 1}</strong> {slot} — {count} personer
+                </li>
+              ))}
             </ul>
           </div>
         )}
