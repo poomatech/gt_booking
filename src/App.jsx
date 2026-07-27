@@ -2,14 +2,18 @@ import { useState, useEffect } from 'react'
 import './App.css'
 
 const DATES = [
-  'Fre 1 aug',
-  'Lör 2 aug',
-  'Sön 3 aug',
-  'Mån 4 aug',
-  'Tis 5 aug',
+  'Fre 31 jul',
+  'Lör 1 aug',
+  'Sön 2 aug',
+  'Fre 7 aug',
+  'Lör 8 aug',
+  'Sön 9 aug',
+  'Fre 14 aug',
+  'Lör 15 aug',
+  'Sön 16 aug',
 ]
 
-const TIME_SLOTS = ['19:00', '20:00', '21:00']
+const TIME_SLOTS = ['Eftermiddag (12-17)', 'Kväll (17-21)']
 
 function App() {
   const [name, setName] = useState('')
