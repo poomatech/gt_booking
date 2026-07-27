@@ -49,10 +49,17 @@ function generateDates() {
   return dates
 }
 
-function isInPast(dateObj, slot) {
+// Varför en tid inte går att välja. Tom sträng = den går bra.
+//
+// Tider FÖRE deadline är blockerade: det är meningslöst att rösta fram en
+// reptid som redan varit när röstningen stänger. Är ingen deadline satt gäller
+// bara att tiden inte får ha passerat.
+function blockReason(dateObj, slot, deadlineAt) {
   const start = new Date(dateObj)
   start.setHours(slot.startHour, 0, 0, 0)
-  return start <= new Date()
+  if (start <= new Date()) return 'passerat'
+  if (deadlineAt && start <= deadlineAt) return 'fore-deadline'
+  return ''
 }
 
 function toDateInputValue(date) {
@@ -71,7 +78,7 @@ const DATES = generateDates()
 function SiteFooter() {
   return (
     <footer className="site-footer">
-      <p>© 2026 Mattias Ericson</p>
+      <p>© {new Date().getFullYear()} Mattias Ericson</p>
       <p lang="en">This is a Marvelous Website by qProd.</p>
     </footer>
   )
@@ -218,7 +225,17 @@ function App() {
   // kvar, efter att omrenderingen har hunnit ske.
   useEffect(() => {
     if (!focusRequest) return
-    document.getElementById(focusRequest)?.focus()
+    // Flera kandidater: det önskade målet kan ha försvunnit i samma ändring
+    // (t.ex. hela topplistan när sista överlappande tiden avmarkeras). Ta
+    // första som faktiskt finns kvar.
+    const candidates = Array.isArray(focusRequest) ? focusRequest : [focusRequest]
+    for (const id of candidates) {
+      const el = document.getElementById(id)
+      if (el) {
+        el.focus()
+        break
+      }
+    }
     setFocusRequest(null)
   }, [focusRequest, people, deadline, submittedName])
 
@@ -337,7 +354,9 @@ function App() {
     if (!dateEntry || !slot) return
     const wasSelected = mySlots.includes(key)
     if (wasSelected && whoCan(dateLabel, slotId).length - 1 < MIN_OVERLAP) {
-      setFocusRequest('topp-rubrik')
+      // Raden försvinner. Var sista kvalificerade tiden försvinner hela rutan
+      // — och med den rubriken — så kalenderrubriken är reservmål.
+      setFocusRequest(['topp-rubrik', 'kalender-rubrik'])
     }
     toggleTime(dateEntry, slot)
   }
@@ -385,7 +404,8 @@ function App() {
     )
   }
 
-  const deadlinePassed = deadline && new Date(deadline.time) < new Date()
+  const deadlineAt = deadline ? new Date(deadline.time) : null
+  const deadlinePassed = deadlineAt && deadlineAt < new Date()
 
   const WEEKS = [0, 1, 2].map((i) => {
     const dates = DATES.slice(i * 7, (i + 1) * 7)
@@ -402,9 +422,15 @@ function App() {
   const cellState = (d, slot) => {
     const selected = mySlots.includes(slotKey(d.label, slot.id))
     const available = whoCan(d.label, slot.id)
-    const past = isInPast(d.date, slot)
-    const disabled = past || deadlinePassed
-    const reason = past ? 'Tiden har passerat.' : deadlinePassed ? 'Röstningen är stängd.' : ''
+    const blocked = blockReason(d.date, slot, deadlineAt)
+    const disabled = Boolean(blocked) || deadlinePassed
+    const reason = blocked === 'passerat'
+      ? 'Tiden har passerat.'
+      : blocked === 'fore-deadline'
+        ? 'Tiden ligger före deadline.'
+        : deadlinePassed
+          ? 'Röstningen är stängd.'
+          : ''
     // Ditt EGET svar står inte i texten — aria-pressed säger redan
     // "nedtryckt/ej nedtryckt". Att upprepa det skulle säga samma sak två
     // gånger, i var och en av de 42 cellerna.
@@ -418,14 +444,18 @@ function App() {
       .filter(Boolean)
       .join(' ')
     const shade = people.length > 0 ? Math.min(available.length / people.length, 1) : 0
-    return { selected, available, past, disabled, label, shade }
+    return { selected, available, blocked, disabled, label, shade }
   }
 
   return (
     <>
-      <a className="skip-link" href="#topp-rubrik">
-        Hoppa till populäraste tiderna
-      </a>
+      {/* Bara när rutan faktiskt finns — en skip-länk till ett mål som inte
+          existerar tar användaren ingenstans. */}
+      {!loading && popular.ready && (
+        <a className="skip-link" href="#topp-rubrik">
+          Hoppa till populäraste tiderna
+        </a>
+      )}
       <a className="skip-link" href="#kalender">
         Hoppa till kalendern
       </a>
@@ -459,61 +489,56 @@ function App() {
         {/* Svaret på frågan ligger FÖRST, inte längst ned. Den som läser sidan
             linjärt med skärmläsare möter det direkt, i stället för att först
             behöva ta sig igenom kalenderns 42 knappar. */}
-        {!loading && (
+        {/* Rutan finns inte alls förrän den bär information. Svaret på frågan
+            ligger då FÖRST på sidan, inte längst ned — den som läser linjärt
+            med skärmläsare möter det direkt i stället för att först ta sig
+            igenom kalenderns 42 knappar. */}
+        {!loading && popular.ready && (
           <section className="best-times" aria-labelledby="topp-rubrik">
             <h2 id="topp-rubrik" tabIndex={-1}>
               Populäraste tiderna
             </h2>
-            {popular.ready ? (
-              <>
-                <p className="best-times-help">
-                  Tider som minst {MIN_OVERLAP} kan. Tryck på en för att markera att du också kan.
-                </p>
-                <ol className="top-list">
-                  {popular.shown.map(([key, count]) => {
-                    const selected = mySlots.includes(key)
-                    const [dateLabel, slotId] = key.split('|')
-                    const past = (() => {
-                      const d = DATES.find((x) => x.label === dateLabel)
-                      const s = TIME_SLOTS.find((x) => x.id === slotId)
-                      return d && s ? isInPast(d.date, s) : true
-                    })()
-                    return (
-                      <li key={key} className="top-time">
-                        <button
-                          type="button"
-                          className={`top-button ${selected ? 'selected' : ''}`}
-                          aria-pressed={selected}
-                          aria-label={`${spokenSlot(key)}. ${count} av ${people.length} kan.${
-                            past ? ' Tiden har passerat.' : ''
-                          }`}
-                          disabled={past || deadlinePassed}
-                          onClick={() => toggleFromTop(key)}
-                        >
-                          <span aria-hidden="true" className="slot-name">
-                            {selected && <span className="checkmark">✓ </span>}
-                            {readableSlot(key)}
-                          </span>
-                          <span aria-hidden="true" className="slot-status">
-                            {count} av {people.length} kan
-                          </span>
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ol>
-                {popular.qualifying.length > popular.shown.length && (
-                  <p className="best-times-note">
-                    Visar {popular.shown.length} av {popular.qualifying.length} tider som minst{' '}
-                    {MIN_OVERLAP} kan.
-                  </p>
-                )}
-              </>
-            ) : (
-              <p>
-                {popular.voters < 2
-                  ? `Visas när minst två har svarat. Hittills har ${popular.voters} svarat.`
-                  : 'Visas när minst två kan samma tid. Än så länge överlappar ingen med någon annan.'}
+            <p className="best-times-help">
+              Tider som minst {MIN_OVERLAP} kan. Tryck på en för att markera att du också kan.
+            </p>
+            <ol className="top-list">
+              {popular.shown.map(([key, count]) => {
+                const selected = mySlots.includes(key)
+                const [dateLabel, slotId] = key.split('|')
+                const d = DATES.find((x) => x.label === dateLabel)
+                const s = TIME_SLOTS.find((x) => x.id === slotId)
+                const blocked = d && s ? blockReason(d.date, s, deadlineAt) : 'passerat'
+                const reason = blocked === 'passerat'
+                  ? ' Tiden har passerat.'
+                  : blocked === 'fore-deadline'
+                    ? ' Tiden ligger före deadline.'
+                    : ''
+                return (
+                  <li key={key} className="top-time">
+                    <button
+                      type="button"
+                      className={`top-button ${selected ? 'selected' : ''}`}
+                      aria-pressed={selected}
+                      aria-label={`${spokenSlot(key)}. ${count} av ${people.length} kan.${reason}`}
+                      disabled={Boolean(blocked) || deadlinePassed}
+                      onClick={() => toggleFromTop(key)}
+                    >
+                      <span aria-hidden="true" className="slot-name">
+                        {selected && <span className="checkmark">✓ </span>}
+                        {readableSlot(key)}
+                      </span>
+                      <span aria-hidden="true" className="slot-status">
+                        {count} av {people.length} kan
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ol>
+            {popular.qualifying.length > popular.shown.length && (
+              <p className="best-times-note">
+                Visar {popular.shown.length} av {popular.qualifying.length} tider som minst{' '}
+                {MIN_OVERLAP} kan.
               </p>
             )}
           </section>
@@ -577,11 +602,10 @@ function App() {
         )}
 
         <section id="kalender" aria-labelledby="kalender-rubrik" className="poll">
-          <h2 id="kalender-rubrik">Välj de tider du kan</h2>
-          <p className="poll-help">
-            Markera varje tid du kan. Du kan ändra dig fram till deadline. Tider som redan passerat går inte
-            att välja. Allas svar sparas gemensamt och syns direkt hos de andra.
-          </p>
+          <h2 id="kalender-rubrik" tabIndex={-1}>
+            Välj de tider du kan
+          </h2>
+          <p className="poll-help">Markera de tider du kan. Du kan ändra fram till deadline.</p>
 
           <fieldset className="view-toggle">
             <legend>Visa kalendern som</legend>
@@ -665,7 +689,7 @@ function App() {
                               >
                                 <span aria-hidden="true" className="cell-content">
                                   {c.selected && <span className="checkmark">✓</span>}
-                                  {c.past && !c.selected && <span className="locked">–</span>}
+                                  {c.blocked && !c.selected && <span className="locked">–</span>}
                                   {c.available.length > 0 && (
                                     <span className="count">{c.available.length}</span>
                                   )}
@@ -701,11 +725,13 @@ function App() {
                                   {slot.label} {slot.range}
                                 </span>
                                 <span aria-hidden="true" className="slot-status">
-                                  {c.past
+                                  {c.blocked === 'passerat'
                                     ? 'passerat'
-                                    : c.available.length > 0
-                                      ? `${c.available.length} av ${people.length} kan`
-                                      : 'ingen än'}
+                                    : c.blocked === 'fore-deadline'
+                                      ? 'före deadline'
+                                      : c.available.length > 0
+                                        ? `${c.available.length} av ${people.length} kan`
+                                        : 'ingen än'}
                                 </span>
                               </button>
                             </li>
@@ -786,6 +812,11 @@ function App() {
             </button>
           </div>
         </section>
+
+        <p className="disclaimer">
+          Tider innan deadline går inte att välja. Allas svar sparas gemensamt och syns direkt hos de
+          andra.
+        </p>
       </main>
       <SiteFooter />
     </>

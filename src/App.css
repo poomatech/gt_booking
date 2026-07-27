@@ -761,6 +761,15 @@ h2:focus-visible {
   cursor: not-allowed;
 }
 
+.disclaimer {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+  color: #4b5563;
+  font-size: 14px;
+  max-width: 65ch;
+}
+
 .site-footer {
   max-width: 1200px;
   margin: 0 auto;
