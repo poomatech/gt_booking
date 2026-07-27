@@ -60,12 +60,38 @@ function toDateInputValue(date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// Kalendern är densamma under hela sidbesöket, så den räknas ut en gång här
+// i stället för per komponent — då kan även hjälpfunktionerna nedan använda den.
+const DATES = generateDates()
+
 const slotKey = (dateLabel, slotId) => `${dateLabel}|${slotId}`
+
+// Upplästa datum ("fredag 31 juli") i stället för de förkortade som visas
+// ("Fre 31 jul"), för det som ska läsas upp av talsyntes.
+function spokenSlot(key) {
+  const [dateLabel, slotId] = key.split('|')
+  const day = DATES.find((d) => d.label === dateLabel)
+  const slot = TIME_SLOTS.find((s) => s.id === slotId)
+  return `${day ? day.spoken : dateLabel}, ${slot ? `${slot.label} ${slot.range}` : slotId}`
+}
+
+// De N mest valda tiderna. Flest röster först; vid lika många vinner det
+// tidigaste datumet, annars avgörs ordningen av godtycklig insättningsordning.
+function topTimesFrom(peopleList, n) {
+  const tally = new Map()
+  peopleList.forEach((p) => {
+    ;(p.slots || []).forEach((key) => tally.set(key, (tally.get(key) || 0) + 1))
+  })
+  return sortSlotKeys([...tally.keys()])
+    .map((key) => [key, tally.get(key)])
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+}
 
 // Sorterar tider KRONOLOGISKT. En rak .sort() på nycklarna ger alfabetisk
 // ordning ("Lör 15 aug" före "Lör 8 aug", "Mån" före "Ons"), vilket är obegripligt
 // att lyssna sig igenom. Ordningen hämtas i stället från kalenderns egen följd.
-function sortSlotKeys(keys, dates) {
+function sortSlotKeys(keys, dates = DATES) {
   const dateOrder = new Map(dates.map((d, i) => [d.label, i]))
   const rank = (key) => {
     const [dateLabel, slotId] = key.split('|')
@@ -110,7 +136,6 @@ function App() {
     return window.matchMedia('(max-width: 768px)').matches ? 'lista' : 'rutnat'
   })
 
-  const DATES = useRef(generateDates()).current
   const nameInputRef = useRef(null)
   const hasLoadedOnce = useRef(false)
 
@@ -136,10 +161,13 @@ function App() {
       // gång någon annan kryssar i en tid.
       if (!hasLoadedOnce.current) {
         hasLoadedOnce.current = true
+        const best = topTimesFrom(list, 1)[0]
         setAnnouncement(
           list.length === 0
             ? 'Inläst. Ingen har anmält sig än.'
-            : `Inläst. ${list.length} deltagare.`
+            : best
+              ? `Inläst. ${list.length} deltagare. Populäraste tiden: ${spokenSlot(best[0])}, ${best[1]} av ${list.length} kan. Hela listan står först på sidan.`
+              : `Inläst. ${list.length} deltagare. Ingen har markerat någon tid än.`
         )
       }
     }, onError)
@@ -263,19 +291,7 @@ function App() {
   const whoCan = (dateLabel, slotId) =>
     people.filter((p) => (p.slots || []).includes(slotKey(dateLabel, slotId))).map((p) => p.name)
 
-  const getTopThreeTimes = () => {
-    const tally = new Map()
-    people.forEach((p) => {
-      ;(p.slots || []).forEach((key) => tally.set(key, (tally.get(key) || 0) + 1))
-    })
-    // Flest röster först. Vid lika många vinner det tidigaste datumet — annars
-    // avgörs ordningen av godtycklig insättningsordning i Map:en.
-    const chronological = sortSlotKeys([...tally.keys()], DATES)
-    return chronological
-      .map((key) => [key, tally.get(key)])
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-  }
+  const topTimes = topTimesFrom(people, 5)
 
   if (!submittedName) {
     return (
@@ -317,7 +333,6 @@ function App() {
     )
   }
 
-  const topTimes = getTopThreeTimes()
   const deadlinePassed = deadline && new Date(deadline.time) < new Date()
 
   const WEEKS = [0, 1, 2].map((i) => {
@@ -356,6 +371,9 @@ function App() {
 
   return (
     <>
+      <a className="skip-link" href="#topp-rubrik">
+        Hoppa till populäraste tiderna
+      </a>
       <a className="skip-link" href="#kalender">
         Hoppa till kalendern
       </a>
@@ -385,6 +403,28 @@ function App() {
         )}
 
         {loading && <p className="loading">Hämtar allas svar…</p>}
+
+        {/* Svaret på frågan ligger FÖRST, inte längst ned. Den som läser sidan
+            linjärt med skärmläsare möter det direkt, i stället för att först
+            behöva ta sig igenom kalenderns 42 knappar. */}
+        {!loading && (
+          <section className="best-times" aria-labelledby="topp-rubrik">
+            <h2 id="topp-rubrik" tabIndex={-1}>
+              Populäraste tiderna
+            </h2>
+            {topTimes.length > 0 ? (
+              <ol>
+                {topTimes.map(([key, count]) => (
+                  <li key={key} className="top-time">
+                    {readableSlot(key)} — {count} av {people.length} kan
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p>Ingen har markerat någon tid än.</p>
+            )}
+          </section>
+        )}
 
         {!deadline && !loading && (
           <section className="deadline-setup" aria-labelledby="deadline-rubrik">
@@ -635,19 +675,6 @@ function App() {
             })}
           </ul>
         </section>
-
-        {topTimes.length > 0 && (
-          <section className="best-times" aria-labelledby="topp-rubrik">
-            <h2 id="topp-rubrik">Tre populäraste tiderna</h2>
-            <ol>
-              {topTimes.map(([key, count]) => (
-                <li key={key} className="top-time">
-                  {readableSlot(key)} — {count} av {people.length} kan
-                </li>
-              ))}
-            </ol>
-          </section>
-        )}
 
         <section className="admin" aria-labelledby="admin-rubrik">
           <h2 id="admin-rubrik">Hantera</h2>
