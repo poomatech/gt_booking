@@ -202,9 +202,155 @@ body {
   max-width: 65ch;
 }
 
+.view-toggle {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 12px 16px 14px;
+  margin-bottom: 16px;
+  background: #fff;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: center;
+}
+
+.view-toggle legend {
+  font-weight: 600;
+  font-size: 15px;
+  padding: 0 6px;
+}
+
+.view-toggle label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 15px;
+}
+
+.view-toggle input {
+  width: 20px;
+  height: 20px;
+  accent-color: #15803d;
+  cursor: pointer;
+}
+
+.week-nav {
+  margin-bottom: 20px;
+}
+
+.week-nav ul {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.week-nav a {
+  display: inline-block;
+  padding: 8px 14px;
+  background: #f3f4f6;
+  border: 1px solid #9ca3af;
+  border-radius: 6px;
+  color: #1f2937;
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.week-nav a:hover {
+  background: #e5e7eb;
+  text-decoration: underline;
+}
+
 .week-section {
   margin-bottom: 28px;
   overflow-x: auto;
+}
+
+/* Rubriken tar emot fokus vid hopp — utan synlig ram ser man inte var man hamnat */
+.week-title:focus-visible,
+.participant-name:focus-visible,
+h2:focus-visible {
+  outline: 3px solid #1d4ed8;
+  outline-offset: 3px;
+}
+
+/* Listvyn: en dag i taget, rubrik per dag */
+
+.day-list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.day-item {
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.day-heading {
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: #1f2937;
+}
+
+.day-slots {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.day-slots > li {
+  flex: 1 1 220px;
+}
+
+.slot-button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: 15px;
+  color: #1f2937;
+  cursor: pointer;
+  text-align: left;
+}
+
+.slot-button:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 2px #047857;
+}
+
+.slot-button.selected {
+  background: #15803d;
+  border-color: #14532d;
+  color: #fff;
+  font-weight: 600;
+}
+
+.slot-button:disabled {
+  background: #f3f4f6;
+  color: #6b7280;
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+.slot-status {
+  font-size: 13px;
+  opacity: 0.85;
+  white-space: nowrap;
 }
 
 .availability-table {

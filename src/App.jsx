@@ -94,6 +94,9 @@ function App() {
   const [announcement, setAnnouncement] = useState('')
   const [nameError, setNameError] = useState('')
   const [focusRequest, setFocusRequest] = useState(null)
+  // Vyval är en inställning per webbläsare, inte delad data — hör hemma i
+  // localStorage, till skillnad från svaren som ligger i Firestore.
+  const [view, setView] = useState(() => localStorage.getItem('gt_view') || 'rutnat')
 
   const DATES = useRef(generateDates()).current
   const nameInputRef = useRef(null)
@@ -164,6 +167,16 @@ function App() {
     } catch (err) {
       setDbError(`Kunde inte spara namnet: ${err.message}`)
     }
+  }
+
+  const changeView = (v) => {
+    setView(v)
+    localStorage.setItem('gt_view', v)
+    setAnnouncement(
+      v === 'lista'
+        ? 'Listvy. Varje dag har en egen rubrik, med två knappar under.'
+        : 'Rutnätsvy. En tabell per vecka, med dagarna som kolumner.'
+    )
   }
 
   const changeName = () => {
@@ -295,6 +308,40 @@ function App() {
   const topTimes = getTopThreeTimes()
   const deadlinePassed = deadline && new Date(deadline.time) < new Date()
 
+  const WEEKS = [0, 1, 2].map((i) => {
+    const dates = DATES.slice(i * 7, (i + 1) * 7)
+    return {
+      index: i,
+      id: `vecka-${i + 1}`,
+      label: `Vecka ${i + 1}: ${dates[0].label} till ${dates[6].label}`,
+      dates,
+    }
+  })
+
+  // Allt en cell behöver veta, delat mellan rutnäts- och listvyn så att de två
+  // aldrig kan hamna i otakt med varandra.
+  const cellState = (d, slot) => {
+    const selected = mySlots.includes(slotKey(d.label, slot.id))
+    const available = whoCan(d.label, slot.id)
+    const past = isInPast(d.date, slot)
+    const disabled = past || deadlinePassed
+    const reason = past ? 'Tiden har passerat.' : deadlinePassed ? 'Röstningen är stängd.' : ''
+    // Ditt EGET svar står inte i texten — aria-pressed säger redan
+    // "nedtryckt/ej nedtryckt". Att upprepa det skulle säga samma sak två
+    // gånger, i var och en av de 42 cellerna.
+    const label = [
+      `${d.spoken}, ${slot.label} ${slot.range}.`,
+      available.length > 0
+        ? `${available.length} av ${people.length} kan: ${available.join(', ')}.`
+        : 'Ingen kan än.',
+      reason,
+    ]
+      .filter(Boolean)
+      .join(' ')
+    const shade = people.length > 0 ? Math.min(available.length / people.length, 1) : 0
+    return { selected, available, past, disabled, label, shade }
+  }
+
   return (
     <>
       <a className="skip-link" href="#kalender">
@@ -391,18 +438,56 @@ function App() {
             att välja. Allas svar sparas gemensamt och syns direkt hos de andra.
           </p>
 
-          {[0, 1, 2].map((weekIndex) => {
-            const weekDates = DATES.slice(weekIndex * 7, (weekIndex + 1) * 7)
-            const weekLabel = `Vecka ${weekIndex + 1}: ${weekDates[0].label} till ${weekDates[6].label}`
+          <fieldset className="view-toggle">
+            <legend>Visa kalendern som</legend>
+            <label>
+              <input
+                type="radio"
+                name="vy"
+                value="rutnat"
+                checked={view === 'rutnat'}
+                onChange={() => changeView('rutnat')}
+              />
+              Rutnät
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="vy"
+                value="lista"
+                checked={view === 'lista'}
+                onChange={() => changeView('lista')}
+              />
+              Lista, en dag i taget
+            </label>
+          </fieldset>
 
-            return (
-              <div key={weekIndex} className="week-section">
-                <table className="availability-table">
-                  <caption className="week-title">{weekLabel}</caption>
+          {/* Egen landmark, så att skärmläsaren kan hoppa hit direkt (D i NVDA)
+              i stället för att passera 14 celler för att nå nästa vecka. */}
+          <nav className="week-nav" aria-label="Hoppa till vecka">
+            <ul>
+              {WEEKS.map((w) => (
+                <li key={w.id}>
+                  <a href={`#${w.id}`}>{w.label}</a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          {WEEKS.map((w) => (
+            <div key={w.id} className="week-section">
+              {/* Rubrik i BÅDA vyerna, inte <caption>: en rubrik går att hoppa
+                  till med H, och dyker upp i skärmläsarens rubriklista. */}
+              <h3 className="week-title" id={w.id} tabIndex={-1}>
+                {w.label}
+              </h3>
+
+              {view === 'rutnat' ? (
+                <table className="availability-table" aria-labelledby={w.id}>
                   <thead>
                     <tr>
                       <th scope="col">Tid</th>
-                      {weekDates.map((d) => (
+                      {w.dates.map((d) => (
                         <th scope="col" key={d.label}>
                           {d.label}
                         </th>
@@ -416,52 +501,29 @@ function App() {
                           {slot.label}
                           <span className="time-range"> {slot.range}</span>
                         </th>
-                        {weekDates.map((d) => {
-                          const selected = mySlots.includes(slotKey(d.label, slot.id))
-                          const available = whoCan(d.label, slot.id)
-                          const past = isInPast(d.date, slot)
-                          const disabled = past || deadlinePassed
-                          const shade =
-                            people.length > 0 ? Math.min(available.length / people.length, 1) : 0
-
-                          const reason = past
-                            ? 'Tiden har passerat.'
-                            : deadlinePassed
-                              ? 'Röstningen är stängd.'
-                              : ''
-                          // Ditt EGET svar står inte i texten — aria-pressed säger
-                          // redan "nedtryckt/ej nedtryckt". Att upprepa det här
-                          // gör att skärmläsaren säger samma sak två gånger, i
-                          // varje av de 42 cellerna.
-                          const label = [
-                            `${d.spoken}, ${slot.label} ${slot.range}.`,
-                            available.length > 0
-                              ? `${available.length} av ${people.length} kan: ${available.join(', ')}.`
-                              : 'Ingen kan än.',
-                            reason,
-                          ]
-                            .filter(Boolean)
-                            .join(' ')
-
+                        {w.dates.map((d) => {
+                          const c = cellState(d, slot)
                           return (
                             <td key={`${d.label}-${slot.id}`} className="time-cell-wrap">
                               <button
                                 type="button"
-                                className={`time-cell ${selected ? 'selected' : ''} ${disabled ? 'disabled' : ''}`}
-                                aria-pressed={selected}
-                                aria-label={label}
-                                disabled={disabled}
+                                className={`time-cell ${c.selected ? 'selected' : ''} ${c.disabled ? 'disabled' : ''}`}
+                                aria-pressed={c.selected}
+                                aria-label={c.label}
+                                disabled={c.disabled}
                                 onClick={() => toggleTime(d, slot)}
                                 style={
-                                  !selected && !disabled && shade > 0
-                                    ? { backgroundColor: `rgba(22, 101, 52, ${0.08 + shade * 0.22})` }
+                                  !c.selected && !c.disabled && c.shade > 0
+                                    ? { backgroundColor: `rgba(22, 101, 52, ${0.08 + c.shade * 0.22})` }
                                     : undefined
                                 }
                               >
                                 <span aria-hidden="true" className="cell-content">
-                                  {selected && <span className="checkmark">✓</span>}
-                                  {past && !selected && <span className="locked">–</span>}
-                                  {available.length > 0 && <span className="count">{available.length}</span>}
+                                  {c.selected && <span className="checkmark">✓</span>}
+                                  {c.past && !c.selected && <span className="locked">–</span>}
+                                  {c.available.length > 0 && (
+                                    <span className="count">{c.available.length}</span>
+                                  )}
                                 </span>
                               </button>
                             </td>
@@ -471,9 +533,46 @@ function App() {
                     ))}
                   </tbody>
                 </table>
-              </div>
-            )
-          })}
+              ) : (
+                <ul className="day-list">
+                  {w.dates.map((d) => (
+                    <li key={d.label} className="day-item">
+                      <h4 className="day-heading">{d.label}</h4>
+                      <ul className="day-slots">
+                        {TIME_SLOTS.map((slot) => {
+                          const c = cellState(d, slot)
+                          return (
+                            <li key={slot.id}>
+                              <button
+                                type="button"
+                                className={`slot-button ${c.selected ? 'selected' : ''}`}
+                                aria-pressed={c.selected}
+                                aria-label={c.label}
+                                disabled={c.disabled}
+                                onClick={() => toggleTime(d, slot)}
+                              >
+                                <span aria-hidden="true" className="slot-name">
+                                  {c.selected && <span className="checkmark">✓ </span>}
+                                  {slot.label} {slot.range}
+                                </span>
+                                <span aria-hidden="true" className="slot-status">
+                                  {c.past
+                                    ? 'passerat'
+                                    : c.available.length > 0
+                                      ? `${c.available.length} av ${people.length} kan`
+                                      : 'ingen än'}
+                                </span>
+                              </button>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
         </section>
 
         <section className="summary" aria-labelledby="deltagare-rubrik">
