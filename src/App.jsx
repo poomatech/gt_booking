@@ -66,12 +66,24 @@ function App() {
     }
   }
 
-  const setDeadlineHandler = (hours) => {
-    const deadlineDate = new Date()
+  const setDeadlineHandler = (date, hours) => {
+    const deadlineDate = new Date(date)
     deadlineDate.setHours(hours, 0, 0, 0)
     const dl = { time: deadlineDate.toISOString(), setBy: submittedName }
     setDeadline(dl)
     localStorage.setItem('rehearsal_deadline', JSON.stringify(dl))
+  }
+
+  const getMinDeadlineDate = () => {
+    const min = new Date()
+    min.setHours(23, 59, 59, 999)
+    return min.toISOString().split('T')[0]
+  }
+
+  const getMaxDeadlineDate = () => {
+    const max = new Date(DATES[DATES.length - 1].date)
+    max.setHours(23, 59, 59, 999)
+    return max.toISOString().split('T')[0]
   }
 
   const toggleTime = (dateObj, time) => {
@@ -156,10 +168,31 @@ function App() {
         <div className="deadline-setup">
           <h2>Sätt deadline för röstning</h2>
           <p>Första personen sätter när röstningen stänger</p>
-          <div className="deadline-buttons">
-            <button onClick={() => setDeadlineHandler(18)}>Idag 18:00</button>
-            <button onClick={() => setDeadlineHandler(20)}>Idag 20:00</button>
-            <button onClick={() => setDeadlineHandler(22)}>Idag 22:00</button>
+          <div className="deadline-form">
+            <input
+              type="date"
+              id="deadline-date"
+              min={getMinDeadlineDate()}
+              max={getMaxDeadlineDate()}
+              defaultValue={new Date().toISOString().split('T')[0]}
+              className="deadline-input"
+            />
+            <select id="deadline-time" className="deadline-input" defaultValue="18">
+              <option value="18">18:00</option>
+              <option value="20">20:00</option>
+              <option value="22">22:00</option>
+              <option value="23">23:00</option>
+            </select>
+            <button
+              onClick={() => {
+                const date = document.getElementById('deadline-date').value
+                const time = document.getElementById('deadline-time').value
+                setDeadlineHandler(date, parseInt(time))
+              }}
+              className="deadline-submit"
+            >
+              Sätt deadline
+            </button>
           </div>
         </div>
       )}
@@ -172,54 +205,65 @@ function App() {
       )}
 
       <div className="poll">
-        <table className="availability-table">
-          <thead>
-            <tr>
-              <th>Tid</th>
-              {DATES.map(d => (
-                <th key={d.label}>{d.label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {TIME_SLOTS.map(time => (
-              <tr key={time}>
-                <td className="time-label">{time}</td>
-                {DATES.map(d => {
-                  const isSelected = responses[`${submittedName}|${d.label}|${time}`]
-                  const availability = getAvailability(d.label, time)
-                  const canBookThisSlot = canBook(d.date, time)
-                  const isDisabled = !canBookThisSlot || deadlinePassed
+        {[0, 1, 2].map(weekIndex => {
+          const weekDates = DATES.slice(weekIndex * 7, (weekIndex + 1) * 7)
+          const weekStart = weekDates[0]?.label || ''
+          const weekEnd = weekDates[weekDates.length - 1]?.label || ''
 
-                  return (
-                    <td
-                      key={`${d.label}-${time}`}
-                      onClick={() => !isDisabled && toggleTime(d.date, time)}
-                      className={`time-cell ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}`}
-                      style={{
-                        backgroundColor: isDisabled
-                          ? '#e5e7eb'
-                          : isSelected
-                          ? '#10b981'
-                          : availability > 0
-                          ? `rgba(34, 197, 94, ${Math.min(availability / (participants.size || 1), 1) * 0.5})`
-                          : 'transparent',
-                        cursor: isDisabled ? 'not-allowed' : 'pointer',
-                        opacity: isDisabled ? 0.6 : 1,
-                      }}
-                    >
-                      <div className="cell-content">
-                        {isSelected && <span className="checkmark">✓</span>}
-                        {availability > 0 && <span className="count">{availability}</span>}
-                        {isDisabled && !canBookThisSlot && <span className="locked">🔒</span>}
-                      </div>
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          return (
+            <div key={weekIndex} className="week-section">
+              <h3 className="week-title">Vecka {weekIndex + 1}: {weekStart} — {weekEnd}</h3>
+              <table className="availability-table">
+                <thead>
+                  <tr>
+                    <th>Tid</th>
+                    {weekDates.map(d => (
+                      <th key={d.label}>{d.label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {TIME_SLOTS.map(time => (
+                    <tr key={time}>
+                      <td className="time-label">{time}</td>
+                      {weekDates.map(d => {
+                        const isSelected = responses[`${submittedName}|${d.label}|${time}`]
+                        const availability = getAvailability(d.label, time)
+                        const canBookThisSlot = canBook(d.date, time)
+                        const isDisabled = !canBookThisSlot || deadlinePassed
+
+                        return (
+                          <td
+                            key={`${d.label}-${time}`}
+                            onClick={() => !isDisabled && toggleTime(d.date, time)}
+                            className={`time-cell ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}`}
+                            style={{
+                              backgroundColor: isDisabled
+                                ? '#e5e7eb'
+                                : isSelected
+                                ? '#10b981'
+                                : availability > 0
+                                ? `rgba(34, 197, 94, ${Math.min(availability / (participants.size || 1), 1) * 0.5})`
+                                : 'transparent',
+                              cursor: isDisabled ? 'not-allowed' : 'pointer',
+                              opacity: isDisabled ? 0.6 : 1,
+                            }}
+                          >
+                            <div className="cell-content">
+                              {isSelected && <span className="checkmark">✓</span>}
+                              {availability > 0 && <span className="count">{availability}</span>}
+                              {isDisabled && !canBookThisSlot && <span className="locked">🔒</span>}
+                            </div>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        })}
       </div>
 
       <div className="summary">

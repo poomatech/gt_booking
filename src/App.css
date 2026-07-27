@@ -121,7 +121,24 @@ body {
 
 .poll {
   margin-bottom: 48px;
-  overflow-x: auto;
+}
+
+.week-section {
+  margin-bottom: 32px;
+}
+
+.week-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.week-section .availability-table {
+  width: 100%;
+  margin-bottom: 16px;
 }
 
 .availability-table {
@@ -245,15 +262,30 @@ body {
   opacity: 0.95;
 }
 
-.deadline-buttons {
+.deadline-form {
   display: flex;
   gap: 12px;
   justify-content: center;
   flex-wrap: wrap;
+  align-items: center;
 }
 
-.deadline-buttons button {
-  padding: 10px 16px;
+.deadline-input {
+  padding: 10px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  background: white;
+  color: #374151;
+}
+
+.deadline-input:focus {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.deadline-submit {
+  padding: 10px 20px;
   background: white;
   color: #d97706;
   border: none;
@@ -263,7 +295,7 @@ body {
   transition: all 0.2s;
 }
 
-.deadline-buttons button:hover {
+.deadline-submit:hover {
   background: #f3f4f6;
   transform: translateY(-2px);
 }
