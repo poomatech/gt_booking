@@ -761,6 +761,34 @@ h2:focus-visible {
   cursor: not-allowed;
 }
 
+/* "Vem kan"-rutan. position: fixed — tabellen scrollar i sidled och skulle
+   klippa en absolutpositionerad ruta. pointer-events: none så den aldrig kan
+   blockera ett klick på cellen under. */
+.who-tip {
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: 260px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: #1f2937;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.4;
+  pointer-events: none;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+  display: grid;
+  gap: 2px;
+}
+
+.who-tip-heading {
+  font-weight: 700;
+}
+
+.who-tip-names {
+  color: #d1d5db;
+}
+
 .disclaimer {
   margin-top: 32px;
   padding-top: 20px;

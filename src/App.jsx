@@ -179,6 +179,11 @@ function App() {
 
   const nameInputRef = useRef(null)
   const hasLoadedOnce = useRef(false)
+  // Vem som kan en tid, visad vid pekare ELLER tangentbordsfokus. Rutan ligger
+  // position:fixed i dokumentroten — tabellen har overflow för sidledsscroll och
+  // skulle klippa en absolutpositionerad ruta.
+  const [tip, setTip] = useState(null)
+  const tipAnchor = useRef(null)
 
   const [deadlineDate, setDeadlineDate] = useState(() => toDateInputValue(new Date()))
   const [deadlineHour, setDeadlineHour] = useState('18')
@@ -238,6 +243,36 @@ function App() {
     }
     setFocusRequest(null)
   }, [focusRequest, people, deadline, submittedName])
+
+  // Escape stänger rutan (WCAG 2.1.1: innehåll som visas vid hover eller fokus
+  // ska gå att avfärda utan att flytta pekaren).
+  //
+  // Vid scroll FLYTTAS rutan i stället för att stängas. Att stänga vore fel:
+  // .focus() scrollar elementet i sikte, vilket utlöser scroll — rutan skulle
+  // då stängas i samma ögonblick den öppnades, varje gång man tabbar till en
+  // cell utanför synfältet.
+  const tipOpen = Boolean(tip)
+  useEffect(() => {
+    if (!tipOpen) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        tipAnchor.current = null
+        setTip(null)
+      }
+    }
+    const onScroll = () => {
+      const el = tipAnchor.current
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      setTip((t) => (t ? { ...t, x: r.left + r.width / 2, y: r.bottom + 8 } : t))
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('scroll', onScroll, true)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('scroll', onScroll, true)
+    }
+  }, [tipOpen])
 
   const me = people.find((p) => p.id === personId(submittedName))
   const mySlots = me?.slots || []
@@ -341,6 +376,22 @@ function App() {
 
   const whoCan = (dateLabel, slotId) =>
     people.filter((p) => (p.slots || []).includes(slotKey(dateLabel, slotId))).map((p) => p.name)
+
+  // Handlers för "vem kan"-rutan. Sätts bara på celler där någon faktiskt kan —
+  // en tom ruta vore bara brus. onFocus/onBlur gör att den även nås med Tab.
+  const tipHandlers = (heading, names) => {
+    if (names.length === 0) return {}
+    const show = (e) => {
+      tipAnchor.current = e.currentTarget
+      const r = e.currentTarget.getBoundingClientRect()
+      setTip({ heading, names: names.join(', '), x: r.left + r.width / 2, y: r.bottom + 8 })
+    }
+    const hide = () => {
+      tipAnchor.current = null
+      setTip(null)
+    }
+    return { onMouseEnter: show, onFocus: show, onMouseLeave: hide, onBlur: hide }
+  }
 
   const popular = popularTimes(people, 5)
 
@@ -522,6 +573,7 @@ function App() {
                       aria-label={`${spokenSlot(key)}. ${count} av ${people.length} kan.${reason}`}
                       disabled={Boolean(blocked) || deadlinePassed}
                       onClick={() => toggleFromTop(key)}
+                      {...tipHandlers(readableSlot(key), whoCan(dateLabel, slotId))}
                     >
                       <span aria-hidden="true" className="slot-name">
                         {selected && <span className="checkmark">✓ </span>}
@@ -681,6 +733,7 @@ function App() {
                                 aria-label={c.label}
                                 disabled={c.disabled}
                                 onClick={() => toggleTime(d, slot)}
+                                {...tipHandlers(`${d.label}, ${slot.label} ${slot.range}`, c.available)}
                                 style={
                                   !c.selected && !c.disabled && c.shade > 0
                                     ? { backgroundColor: `rgba(22, 101, 52, ${0.08 + c.shade * 0.22})` }
@@ -719,6 +772,7 @@ function App() {
                                 aria-label={c.label}
                                 disabled={c.disabled}
                                 onClick={() => toggleTime(d, slot)}
+                                {...tipHandlers(`${d.label}, ${slot.label} ${slot.range}`, c.available)}
                               >
                                 <span aria-hidden="true" className="slot-name">
                                   {c.selected && <span className="checkmark">✓ </span>}
@@ -818,6 +872,17 @@ function App() {
           andra.
         </p>
       </main>
+
+      {/* aria-hidden: knappens aria-label innehåller redan namnen, så utan detta
+          skulle skärmläsaren läsa upp dem två gånger. Rutan är alltså en rent
+          visuell komplettering för seende — informationspariteten fanns redan. */}
+      {tip && (
+        <div className="who-tip" aria-hidden="true" style={{ left: tip.x, top: tip.y }}>
+          <span className="who-tip-heading">{tip.heading}</span>
+          <span className="who-tip-names">{tip.names}</span>
+        </div>
+      )}
+
       <SiteFooter />
     </>
   )
